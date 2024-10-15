@@ -90,6 +90,11 @@ class MICCAIPaperScraper(QMainWindow):
         self.downloadButton.clicked.connect(self.downloadPDFs)
         main_layout.addWidget(self.downloadButton)
 
+        # Add select all checkbox
+        self.selectAllCheckbox = QCheckBox('Select All', self)
+        self.selectAllCheckbox.stateChanged.connect(self.onSelectAllChanged)
+        main_layout.addWidget(self.selectAllCheckbox)
+
         # Results area
         self.resultArea = QScrollArea()
         self.resultWidget = QWidget()
@@ -125,7 +130,12 @@ class MICCAIPaperScraper(QMainWindow):
     def highlightKeywords(self, text, keywords):
         highlighted_text = text
         for keyword in keywords:
-            highlighted_text = highlighted_text.replace(keyword, f"<span style='background-color: yellow;'>{keyword}</span>")
+            highlighted_text = re.sub(
+                f'({re.escape(keyword)})',
+                r'<span style="color: red;">\1</span>',
+                highlighted_text,
+                flags=re.IGNORECASE
+            )
         return highlighted_text
 
     def displayPapers(self, papers_to_display):
@@ -134,6 +144,7 @@ class MICCAIPaperScraper(QMainWindow):
             self.resultLayout.itemAt(i).widget().setParent(None)
 
         self.selected_papers = []
+        self.paper_checkboxes = []  # Store references to checkboxes
         keywords = [input.text().lower() for input in self.searchInputs if input.text()]
 
         for paper in papers_to_display:
@@ -143,6 +154,7 @@ class MICCAIPaperScraper(QMainWindow):
             # Add checkbox for selection
             checkbox = QCheckBox(self)
             checkbox.stateChanged.connect(lambda state, p=paper: self.onPaperSelected(state, p))
+            self.paper_checkboxes.append(checkbox)  # Store checkbox reference
             paper_layout.addWidget(checkbox)
 
             # Highlight keywords in title
@@ -152,8 +164,11 @@ class MICCAIPaperScraper(QMainWindow):
             title_label.setTextFormat(Qt.RichText)
             paper_layout.addWidget(title_label)
             
-            authors_label = QLabel(f"Authors: {paper['authors']}")
+            # Highlight keywords in authors
+            highlighted_authors = self.highlightKeywords(paper['authors'], keywords)
+            authors_label = QLabel(f"Authors: {highlighted_authors}")
             authors_label.setWordWrap(True)
+            authors_label.setTextFormat(Qt.RichText)
             paper_layout.addWidget(authors_label)
             
             pdf_link = QLabel(f"<a href='{paper['pdf_link']}'>PDF</a>")
@@ -169,6 +184,10 @@ class MICCAIPaperScraper(QMainWindow):
             self.resultLayout.addWidget(paper_widget)
 
         self.resultWidget.setLayout(self.resultLayout)
+
+    def onSelectAllChanged(self, state):
+        for checkbox in self.paper_checkboxes:
+            checkbox.setChecked(state == Qt.Checked)
 
     def onPaperSelected(self, state, paper):
         if state == Qt.Checked:
@@ -212,23 +231,25 @@ class MICCAIPaperScraper(QMainWindow):
         if not os.path.exists(download_dir):
             os.makedirs(download_dir)
 
+        downloaded_count = 0
+        skipped_count = 0
+
         for paper in self.selected_papers:
             pdf_url = paper['pdf_link']
             base_filename = self.sanitize_filename(paper['title']) + '.pdf'
             filename = os.path.join(download_dir, base_filename)
             
-            # Check if file already exists and add number if necessary
-            counter = 1
-            while os.path.exists(filename):
-                name, ext = os.path.splitext(base_filename)
-                filename = os.path.join(download_dir, f"{name}_{counter}{ext}")
-                counter += 1
+            if os.path.exists(filename):
+                skipped_count += 1
+                continue
 
             response = requests.get(pdf_url)
             with open(filename, 'wb') as f:
                 f.write(response.content)
+            downloaded_count += 1
 
-        QMessageBox.information(self, "Success", f"Selected PDFs downloaded to {download_dir}!")
+        message = f"Download completed!\nSuccessfully downloaded: {downloaded_count} files\nSkipped duplicates: {skipped_count} files"
+        QMessageBox.information(self, "Success", message)
 
 if __name__ == '__main__':
     app = QApplication(sys.argv)
