@@ -2,6 +2,7 @@ import sys
 import os
 import json
 import requests
+import re
 from bs4 import BeautifulSoup
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QPushButton, QTextEdit, QVBoxLayout, QWidget, QLineEdit, 
                              QLabel, QHBoxLayout, QMessageBox, QCheckBox, QGroupBox, QGridLayout, QScrollArea)
@@ -20,7 +21,8 @@ class DataFetchThread(QThread):
         paper_elements = soup.find_all('div', class_='posts-list-item')
 
         for paper in paper_elements:
-            title = paper.find('b').text.strip()
+            title_element = paper.find('b')
+            title = title_element.text.strip() if title_element else "No title"
             authors = [a.text.strip() for a in paper.find_all('a', href=lambda href: href and '/miccai-2024/tags#' in href)]
             pdf_link = paper.find('a', href=lambda href: href and href.endswith('.pdf'))['href']
             paper_info_link = paper.find('a', href=lambda href: href and href.startswith('/miccai-2024/'))['href']
@@ -193,6 +195,14 @@ class MICCAIPaperScraper(QMainWindow):
 
         self.displayPapers(self.filtered_papers)
 
+    def sanitize_filename(self, filename):
+        # Remove invalid characters
+        filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+        # Replace spaces with underscores
+        filename = filename.replace(' ', '_')
+        # Limit filename length (adjust as needed)
+        return filename[:200]
+
     def downloadPDFs(self):
         if not self.selected_papers:
             QMessageBox.warning(self, "Warning", "No papers selected for download!")
@@ -204,7 +214,16 @@ class MICCAIPaperScraper(QMainWindow):
 
         for paper in self.selected_papers:
             pdf_url = paper['pdf_link']
-            filename = os.path.join(download_dir, pdf_url.split('/')[-1])
+            base_filename = self.sanitize_filename(paper['title']) + '.pdf'
+            filename = os.path.join(download_dir, base_filename)
+            
+            # Check if file already exists and add number if necessary
+            counter = 1
+            while os.path.exists(filename):
+                name, ext = os.path.splitext(base_filename)
+                filename = os.path.join(download_dir, f"{name}_{counter}{ext}")
+                counter += 1
+
             response = requests.get(pdf_url)
             with open(filename, 'wb') as f:
                 f.write(response.content)
